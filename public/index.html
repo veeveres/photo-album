@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photo Album</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #f5f5f7; color: #1d1d1f; }
+.header { background: #fff; border-bottom: 1px solid #e5e5e5; padding: 16px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+.header h1 { font-size: 22px; font-weight: 600; }
+.header nav { display: flex; gap: 8px; margin-left: auto; }
+.header nav button { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; background: #e5e5e5; transition: all .2s; }
+.header nav button.active { background: #0071e3; color: #fff; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+/* Upload zone */
+.upload-zone { border: 2px dashed #c5c5c7; border-radius: 16px; padding: 48px; text-align: center; cursor: pointer; transition: all .2s; background: #fff; margin-bottom: 24px; }
+.upload-zone.drag { border-color: #0071e3; background: #f0f7ff; }
+.upload-zone h2 { font-size: 18px; margin-bottom: 8px; }
+.upload-zone p { color: #86868b; font-size: 14px; }
+.upload-zone input { display: none; }
+.upload-progress { margin-top: 12px; font-size: 13px; color: #0071e3; }
+
+/* Grid */
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.photo-card { background: #fff; border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform .2s, box-shadow .2s; position: relative; }
+.photo-card:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,.1); }
+.photo-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.photo-card .info { padding: 10px 12px; }
+.photo-card .info .date { font-size: 12px; color: #86868b; }
+.photo-card .info .location { font-size: 12px; color: #0071e3; margin-top: 2px; }
+.photo-card .badge { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+.photo-card .delete-btn { position: absolute; top: 8px; left: 8px; background: rgba(255,59,48,.85); color: #fff; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: none; font-size: 14px; line-height: 24px; text-align: center; }
+.photo-card:hover .delete-btn { display: block; }
+
+/* Albums */
+.album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.album-card { background: #fff; border-radius: 16px; overflow: hidden; cursor: pointer; transition: transform .2s; }
+.album-card:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,.1); }
+.album-card .preview { display: grid; grid-template-columns: 1fr 1fr; height: 180px; }
+.album-card .preview img { width: 100%; height: 100%; object-fit: cover; }
+.album-card .preview .empty { background: #e5e5e5; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 32px; }
+.album-card .meta { padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
+.album-card .meta h3 { font-size: 15px; font-weight: 600; }
+.album-card .meta span { font-size: 13px; color: #86868b; }
+.album-actions { display: flex; gap: 8px; margin-top: 8px; }
+.album-actions button { padding: 6px 12px; border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; cursor: pointer; font-size: 13px; }
+.album-actions button:hover { background: #f5f5f7; }
+.album-actions .export-btn { background: #0071e3; color: #fff; border-color: #0071e3; }
+.album-actions .export-btn:hover { background: #0062c4; }
+
+/* Album detail view */
+.album-detail { display: none; }
+.album-detail .back { cursor: pointer; color: #0071e3; font-size: 14px; margin-bottom: 16px; display: inline-block; }
+.album-detail h2 { font-size: 24px; margin-bottom: 4px; cursor: pointer; }
+.album-detail h2:hover { text-decoration: underline; }
+
+/* Modal */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 200; align-items: center; justify-content: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: #fff; border-radius: 16px; max-width: 700px; width: 90%; max-height: 90vh; overflow-y: auto; }
+.modal img { width: 100%; border-radius: 16px 16px 0 0; }
+.modal .details { padding: 20px; }
+.modal .details h3 { font-size: 16px; margin-bottom: 8px; }
+.modal .details p { font-size: 14px; color: #555; margin-bottom: 6px; }
+.modal .details .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.modal .details .tags span { background: #f0f0f0; padding: 4px 10px; border-radius: 12px; font-size: 12px; }
+.modal .move-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee; }
+.modal .move-section select { padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd; font-size: 13px; }
+.close-modal { position: absolute; top: 16px; right: 16px; background: rgba(0,0,0,.6); color: #fff; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-size: 18px; }
+
+.hidden { display: none; }
+.loading { text-align: center; padding: 48px; color: #86868b; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📸 Photo Album</h1>
+  <nav>
+    <button class="active" onclick="showView('photos')">All Photos</button>
+    <button onclick="showView('albums')">Albums</button>
+  </nav>
+</div>
+
+<div class="container">
+  <div class="upload-zone" id="uploadZone">
+    <h2>📁 Drop photos here</h2>
+    <p>or click to browse • JPEG, PNG, WebP supported</p>
+    <input type="file" id="fileInput" multiple accept="image/*">
+    <div class="upload-progress hidden" id="uploadProgress"></div>
+  </div>
+
+  <div id="photosView">
+    <div class="photo-grid" id="photoGrid"></div>
+  </div>
+
+  <div id="albumsView" class="hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2>Albums</h2>
+      <button onclick="createAlbum()" style="padding:8px 16px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;cursor:pointer">+ New Album</button>
+    </div>
+    <div class="album-grid" id="albumGrid"></div>
+  </div>
+
+  <div id="albumDetail" class="album-detail">
+    <span class="back" onclick="showView('albums')">← Back to Albums</span>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <h2 id="albumTitle" onclick="renameCurrentAlbum()"></h2>
+      <button class="export-btn" onclick="exportAlbum()" style="padding:8px 16px;background:#0071e3;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px">📄 Export PDF</button>
+    </div>
+    <div class="photo-grid" id="albumPhotoGrid"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <button class="close-modal" onclick="document.getElementById('modalOverlay').classList.remove('show')">✕</button>
+    <img id="modalImg">
+    <div class="details" id="modalDetails"></div>
+  </div>
+</div>
+
+<script>
+let allPhotos = [], allAlbums = [], currentAlbumId = null;
+
+// Upload
+const zone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+zone.addEventListener('click', () => fileInput.click());
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag'); uploadFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', e => uploadFiles(e.target.files));
+
+async function uploadFiles(files) {
+  if (!files.length) return;
+  const prog = document.getElementById('uploadProgress');
+  prog.classList.remove('hidden');
+  prog.textContent = `Uploading ${files.length} photo(s)...`;
+  const fd = new FormData();
+  for (const f of files) fd.append('photos', f);
+  try {
+    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await r.json();
+    prog.textContent = `✓ ${data.photos.length} photo(s) uploaded! AI analysis in progress...`;
+    setTimeout(() => { prog.classList.add('hidden'); loadPhotos(); loadAlbums(); }, 3000);
+    loadPhotos();
+  } catch(e) { prog.textContent = 'Upload failed'; }
+}
+
+async function loadPhotos() {
+  const r = await fetch('/api/photos');
+  allPhotos = await r.json();
+  renderPhotos();
+}
+
+async function loadAlbums() {
+  const r = await fetch('/api/albums');
+  allAlbums = await r.json();
+  renderAlbums();
+}
+
+function renderPhotos() {
+  const grid = document.getElementById('photoGrid');
+  if (!allPhotos.length) { grid.innerHTML = '<div class="loading">No photos yet. Upload some!</div>'; return; }
+  grid.innerHTML = allPhotos.map(p => `
+    <div class="photo-card" onclick="showPhoto(${p.id})">
+      <button class="delete-btn" onclick="event.stopPropagation();deletePhoto(${p.id})">✕</button>
+      ${p.album_name ? `<span class="badge">${esc(p.album_name)}</span>` : ''}
+      <img src="/thumbnails/${p.thumbnail}" loading="lazy" alt="">
+      <div class="info">
+        <div class="date">${p.date_taken ? new Date(p.date_taken).toLocaleDateString() : 'No date'}</div>
+        ${p.location_name ? `<div class="location">📍 ${esc(p.location_name)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderAlbums() {
+  const grid = document.getElementById('albumGrid');
+  if (!allAlbums.length) { grid.innerHTML = '<div class="loading">No albums yet. Upload photos to auto-generate albums!</div>'; return; }
+  grid.innerHTML = allAlbums.map(a => {
+    const photos = allPhotos.filter(p => p.album_id === a.id).slice(0, 4);
+    const previews = Array.from({length: 4}, (_, i) => photos[i] ? `<img src="/thumbnails/${photos[i].thumbnail}">` : '<div class="empty">+</div>').join('');
+    return `
+      <div class="album-card" onclick="openAlbum(${a.id})">
+        <div class="preview">${previews}</div>
+        <div class="meta">
+          <h3>${esc(a.name)}</h3>
+          <span>${a.photo_count} photos</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function openAlbum(id) {
+  currentAlbumId = id;
+  const album = allAlbums.find(a => a.id === id);
+  document.getElementById('albumTitle').textContent = album?.name || 'Album';
+  document.getElementById('photosView').classList.add('hidden');
+  document.getElementById('albumsView').classList.add('hidden');
+  document.getElementById('albumDetail').style.display = 'block';
+  document.querySelectorAll('.header nav button').forEach(b => b.classList.remove('active'));
+
+  const r = await fetch(`/api/albums/${id}/photos`);
+  const photos = await r.json();
+  const grid = document.getElementById('albumPhotoGrid');
+  grid.innerHTML = photos.map(p => `
+    <div class="photo-card" onclick="showPhoto(${p.id})" draggable="true" data-id="${p.id}">
+      <button class="delete-btn" onclick="event.stopPropagation();deletePhoto(${p.id})">✕</button>
+      <img src="/thumbnails/${p.thumbnail}" loading="lazy" alt="">
+      <div class="info">
+        <div class="date">${p.date_taken ? new Date(p.date_taken).toLocaleDateString() : ''}</div>
+        ${p.location_name ? `<div class="location">📍 ${esc(p.location_name)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function showView(view) {
+  document.getElementById('photosView').classList.toggle('hidden', view !== 'photos');
+  document.getElementById('albumsView').classList.toggle('hidden', view !== 'albums');
+  document.getElementById('albumDetail').style.display = 'none';
+  document.querySelectorAll('.header nav button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.header nav button').forEach(b => { if (b.textContent.toLowerCase().includes(view.replace('s',''))) b.classList.add('active'); });
+  if (view === 'albums') loadAlbums();
+  if (view === 'photos') loadPhotos();
+}
+
+function showPhoto(id) {
+  const p = allPhotos.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('modalImg').src = `/uploads/${p.filename}`;
+  let html = '';
+  if (p.date_taken) html += `<p>📅 ${new Date(p.date_taken).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>`;
+  if (p.location_name) html += `<p>📍 ${esc(p.location_name)}</p>`;
+  if (p.camera) html += `<p>📷 ${esc(p.camera)}</p>`;
+  if (p.ai_description) html += `<p style="margin-top:8px">${esc(p.ai_description)}</p>`;
+  if (p.ai_tags) html += `<div class="tags">${p.ai_tags.split(',').map(t => `<span>${esc(t.trim())}</span>`).join('')}</div>`;
+  html += `<div class="move-section"><label>Move to album: </label><select onchange="movePhoto(${p.id}, this.value)"><option value="">—</option>${allAlbums.map(a => `<option value="${a.id}" ${p.album_id === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>`;
+  document.getElementById('modalDetails').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('show');
+}
+
+function closeModal(e) { if (e.target === document.getElementById('modalOverlay')) document.getElementById('modalOverlay').classList.remove('show'); }
+
+async function deletePhoto(id) {
+  if (!confirm('Delete this photo?')) return;
+  await fetch(`/api/photos/${id}`, { method: 'DELETE' });
+  loadPhotos(); loadAlbums();
+  if (currentAlbumId) openAlbum(currentAlbumId);
+}
+
+async function movePhoto(photoId, albumId) {
+  await fetch(`/api/photos/${photoId}/move`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ album_id: albumId || null }) });
+  loadPhotos(); loadAlbums();
+}
+
+async function renameCurrentAlbum() {
+  const album = allAlbums.find(a => a.id === currentAlbumId);
+  const name = prompt('Rename album:', album?.name);
+  if (name && name.trim()) {
+    await fetch(`/api/albums/${currentAlbumId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+    document.getElementById('albumTitle').textContent = name.trim();
+    loadAlbums();
+  }
+}
+
+async function createAlbum() {
+  const name = prompt('Album name:');
+  if (name && name.trim()) {
+    await fetch('/api/albums', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+    loadAlbums();
+  }
+}
+
+function exportAlbum() {
+  if (currentAlbumId) window.open(`/api/albums/${currentAlbumId}/pdf`);
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// Init
+loadPhotos();
+loadAlbums();
+// Refresh periodically to pick up AI results
+setInterval(() => { loadPhotos(); loadAlbums(); }, 10000);
+</script>
+</body>
+</html>
