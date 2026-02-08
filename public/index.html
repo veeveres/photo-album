@@ -133,6 +133,58 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
 /* New album button */
 .new-album-btn { padding: 8px 16px; border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; cursor: pointer; font-size: 13px; touch-action: manipulation; min-height: 44px; }
+
+/* Book Viewer */
+.book-viewer-overlay { display:none; position:fixed; inset:0; background:#fafafa; z-index:300; flex-direction:column; }
+.book-viewer-overlay.show { display:flex; }
+.book-topbar { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#fff; border-bottom:1px solid #e5e5e5; flex-shrink:0; }
+.book-topbar h2 { font-size:17px; font-weight:300; letter-spacing:.5px; }
+.book-topbar .book-close { background:none; border:none; font-size:28px; cursor:pointer; color:#333; padding:4px 8px; touch-action:manipulation; }
+.book-topbar .book-page-ind { font-size:12px; color:#86868b; font-variant:small-caps; letter-spacing:1px; }
+.book-topbar .book-pdf-btn { padding:6px 14px; background:#0071e3; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:13px; touch-action:manipulation; }
+.book-stage { flex:1; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; perspective:1200px; }
+.book-page { position:absolute; width:min(90vw,600px); max-height:85vh; background:#fff; border-radius:4px; box-shadow:0 2px 20px rgba(0,0,0,.08), 0 0 1px rgba(0,0,0,.1); padding:40px 36px; display:flex; flex-direction:column; align-items:center; justify-content:center; transition:transform .5s ease, opacity .4s ease; backface-visibility:hidden; transform-origin:center center; }
+.book-page.current { transform:rotateY(0deg); opacity:1; z-index:2; }
+.book-page.prev { transform:rotateY(-30deg) scale(.9); opacity:0; z-index:1; pointer-events:none; }
+.book-page.next { transform:rotateY(30deg) scale(.9); opacity:0; z-index:1; pointer-events:none; }
+.book-page.hidden { display:none; }
+.book-page .page-num { position:absolute; bottom:14px; font-size:10px; color:#bbb; font-variant:small-caps; letter-spacing:1px; }
+
+/* Book page layouts */
+.book-cover { text-align:center; gap:20px; }
+.book-cover img { max-width:80%; max-height:50vh; object-fit:contain; border-radius:4px; box-shadow:0 4px 24px rgba(0,0,0,.1); }
+.book-cover .cover-title { font-size:26px; font-weight:300; letter-spacing:1px; margin-top:16px; }
+.book-cover .cover-meta { font-size:11px; color:#86868b; font-variant:small-caps; letter-spacing:1.5px; margin-top:4px; }
+
+.book-fullbleed { padding:0!important; overflow:hidden; }
+.book-fullbleed img { width:100%; height:100%; object-fit:cover; border-radius:4px; }
+.book-fullbleed .fb-caption { position:absolute; bottom:0; left:0; right:0; padding:20px 24px 16px; background:linear-gradient(transparent, rgba(0,0,0,.5)); color:#fff; font-size:12px; font-weight:300; letter-spacing:.3px; }
+
+.book-twoup { flex-direction:row!important; gap:12px; padding:32px 24px!important; }
+.book-twoup img { flex:1; max-width:48%; max-height:70vh; object-fit:contain; border-radius:3px; box-shadow:0 2px 12px rgba(0,0,0,.06); }
+.book-twoup .twoup-captions { position:absolute; bottom:16px; left:24px; right:24px; display:flex; gap:12px; }
+.book-twoup .twoup-captions span { flex:1; font-size:11px; color:#86868b; text-align:center; font-variant:small-caps; }
+
+.book-feature { gap:12px; padding:28px 24px!important; }
+.book-feature .feat-main { max-width:90%; max-height:50vh; object-fit:contain; border-radius:3px; box-shadow:0 2px 16px rgba(0,0,0,.08); }
+.book-feature .feat-row { display:flex; gap:8px; margin-top:4px; }
+.book-feature .feat-row img { flex:1; max-height:18vh; object-fit:cover; border-radius:3px; box-shadow:0 1px 6px rgba(0,0,0,.06); }
+.book-feature .feat-caption { font-size:11px; color:#86868b; margin-top:8px; font-variant:small-caps; letter-spacing:.5px; }
+
+.book-collage { display:grid!important; grid-template-columns:1fr 1fr; gap:8px; padding:28px 24px!important; }
+.book-collage img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:3px; box-shadow:0 1px 8px rgba(0,0,0,.06); }
+.book-collage .collage-caption { grid-column:1/-1; font-size:11px; color:#86868b; text-align:center; font-variant:small-caps; margin-top:4px; }
+
+.book-divider { text-align:center; gap:8px; }
+.book-divider .divider-date { font-size:22px; font-weight:200; letter-spacing:2px; color:#333; }
+.book-divider .divider-loc { font-size:12px; color:#86868b; font-variant:small-caps; letter-spacing:1.5px; }
+.book-divider hr { width:40px; border:none; border-top:1px solid #ddd; margin:8px auto; }
+
+.book-nav-btn { position:absolute; top:50%; transform:translateY(-50%); background:rgba(0,0,0,.04); border:none; border-radius:50%; width:48px; height:48px; cursor:pointer; font-size:24px; color:#666; z-index:5; touch-action:manipulation; transition:background .2s; }
+.book-nav-btn:hover { background:rgba(0,0,0,.1); }
+.book-nav-prev { left:12px; }
+.book-nav-next { right:12px; }
+@media(max-width:599px) { .book-nav-btn { display:none; } .book-page { width:96vw; padding:24px 16px; } }
 </style>
 </head>
 <body>
@@ -185,6 +237,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     <span class="back" onclick="showView('albums')">← Back to Albums</span>
     <div class="album-header">
       <h2 id="albumTitle" onclick="renameCurrentAlbum()"></h2>
+      <button class="export-btn" onclick="openBookViewer()" style="background:#333">📖 View Book</button>
       <button class="export-btn" onclick="exportAlbum()">📦 Download ZIP</button>
     </div>
     <div class="photo-grid" id="albumPhotoGrid"></div>
@@ -198,6 +251,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     <button class="close-modal" onclick="document.getElementById('modalOverlay').classList.remove('show')">✕</button>
     <img id="modalImg">
     <div class="details" id="modalDetails"></div>
+  </div>
+</div>
+
+<div class="book-viewer-overlay" id="bookViewer">
+  <div class="book-topbar">
+    <button class="book-close" onclick="closeBookViewer()">✕</button>
+    <h2 id="bookTitle"></h2>
+    <span class="book-page-ind" id="bookPageInd"></span>
+    <button class="book-pdf-btn" onclick="downloadBookPdf()">⬇ PDF</button>
+  </div>
+  <div class="book-stage" id="bookStage">
+    <button class="book-nav-btn book-nav-prev" onclick="bookNav(-1)">‹</button>
+    <button class="book-nav-btn book-nav-next" onclick="bookNav(1)">›</button>
   </div>
 </div>
 
@@ -605,6 +671,119 @@ document.addEventListener('keydown', e => {
 
 // Reset photo list when switching views
 const origShowView = showView;
+
+// ─── Book Viewer ─────────────────────────────────────────
+let bookPages = [], bookCurrentPage = 0;
+
+async function openBookViewer() {
+  if (!currentAlbumId) return;
+  const album = allAlbums.find(a => a.id === currentAlbumId);
+  document.getElementById('bookTitle').textContent = album?.name || 'Photo Book';
+  document.getElementById('bookViewer').classList.add('show');
+  document.getElementById('bookStage').querySelectorAll('.book-page').forEach(el => el.remove());
+
+  try {
+    const r = await fetch(`/api/albums/${currentAlbumId}/book`);
+    const data = await r.json();
+    bookPages = data.pages || [];
+    bookCurrentPage = 0;
+    renderBookPages();
+    updateBookPage();
+  } catch(e) { console.error('Book load error:', e); }
+}
+
+function renderBookPages() {
+  const stage = document.getElementById('bookStage');
+  stage.querySelectorAll('.book-page').forEach(el => el.remove());
+
+  bookPages.forEach((page, i) => {
+    const div = document.createElement('div');
+    div.className = 'book-page hidden';
+    div.dataset.index = i;
+
+    if (page.type === 'cover') {
+      div.classList.add('book-cover');
+      div.innerHTML = `
+        ${page.photo ? `<img src="/uploads/${page.photo.filename}" alt="">` : ''}
+        <div class="cover-title">${esc(page.title || '')}</div>
+        <div class="cover-meta">${esc(page.dateRange || '')}${page.location ? ' · ' + esc(page.location) : ''}</div>
+      `;
+    } else if (page.type === 'fullbleed') {
+      div.classList.add('book-fullbleed');
+      const p = page.photos[0];
+      div.innerHTML = `<img src="/uploads/${p.filename}" alt=""><div class="fb-caption">${esc(p.caption || '')}</div>`;
+    } else if (page.type === 'twoup') {
+      div.classList.add('book-twoup');
+      div.innerHTML = page.photos.map(p => `<img src="/uploads/${p.filename}" alt="">`).join('') +
+        `<div class="twoup-captions">${page.photos.map(p => `<span>${esc(p.caption || '')}</span>`).join('')}</div>`;
+    } else if (page.type === 'feature') {
+      div.classList.add('book-feature');
+      const [main, ...rest] = page.photos;
+      div.innerHTML = `<img class="feat-main" src="/uploads/${main.filename}" alt="">
+        <div class="feat-row">${rest.map(p => `<img src="/uploads/${p.filename}" alt="">`).join('')}</div>
+        <div class="feat-caption">${esc(page.caption || '')}</div>`;
+    } else if (page.type === 'collage') {
+      div.classList.add('book-collage');
+      div.innerHTML = page.photos.map(p => `<img src="/uploads/${p.filename}" alt="">`).join('') +
+        `<div class="collage-caption">${esc(page.caption || '')}</div>`;
+    } else if (page.type === 'divider') {
+      div.classList.add('book-divider');
+      div.innerHTML = `<div class="divider-date">${esc(page.date || '')}</div><hr>${page.location ? `<div class="divider-loc">${esc(page.location)}</div>` : ''}`;
+    }
+
+    if (page.type !== 'cover') {
+      const pn = document.createElement('div');
+      pn.className = 'page-num';
+      pn.textContent = i;
+      div.appendChild(pn);
+    }
+
+    stage.appendChild(div);
+  });
+}
+
+function updateBookPage() {
+  const pages = document.getElementById('bookStage').querySelectorAll('.book-page');
+  pages.forEach((el, i) => {
+    el.classList.remove('current', 'prev', 'next', 'hidden');
+    if (i === bookCurrentPage) el.classList.add('current');
+    else if (i === bookCurrentPage - 1) el.classList.add('prev');
+    else if (i === bookCurrentPage + 1) el.classList.add('next');
+    else el.classList.add('hidden');
+  });
+  document.getElementById('bookPageInd').textContent = `${bookCurrentPage + 1} / ${bookPages.length}`;
+}
+
+function bookNav(dir) {
+  const n = bookCurrentPage + dir;
+  if (n >= 0 && n < bookPages.length) { bookCurrentPage = n; updateBookPage(); }
+}
+
+function closeBookViewer() { document.getElementById('bookViewer').classList.remove('show'); }
+
+function downloadBookPdf() {
+  if (currentAlbumId) window.open(`/api/albums/${currentAlbumId}/book/pdf`);
+}
+
+// Swipe support for book
+(function() {
+  let sx = 0, sy = 0;
+  const stage = document.getElementById('bookStage');
+  stage.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  stage.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - sx;
+    const dy = e.changedTouches[0].clientY - sy;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) bookNav(dx < 0 ? 1 : -1);
+  }, { passive: true });
+})();
+
+// Keyboard for book viewer
+document.addEventListener('keydown', e => {
+  if (!document.getElementById('bookViewer').classList.contains('show')) return;
+  if (e.key === 'ArrowLeft') bookNav(-1);
+  else if (e.key === 'ArrowRight') bookNav(1);
+  else if (e.key === 'Escape') closeBookViewer();
+});
 
 // Init
 loadPhotos();

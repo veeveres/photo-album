@@ -459,4 +459,259 @@ h1{text-align:center;margin-bottom:20px}.grid{display:grid;grid-template-columns
   await archive.finalize();
 });
 
+// ─── Photo Book Layout Engine ────────────────────────────────
+function generateBookLayout(albumId) {
+  const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(albumId);
+  if (!album) return null;
+
+  const photos = db.prepare('SELECT * FROM photos WHERE album_id = ? ORDER BY date_taken, sort_order, created_at').all(albumId);
+  if (!photos.length) return { album, pages: [] };
+
+  // Get image dimensions for orientation detection
+  const photoData = photos.map(p => {
+    let orientation = 'landscape';
+    try {
+      const meta = sharp(path.join(__dirname, 'uploads', p.filename));
+      // We'll use a simple heuristic: check filename or AI tags
+    } catch(e) {}
+    const tags = (p.ai_tags || '').toLowerCase();
+    const hasFaces = tags.includes('people') || tags.includes('portrait') || tags.includes('family') || tags.includes('group') || tags.includes('couple');
+    const quality = (hasFaces ? 2 : 0) + (p.ai_description ? 1 : 0) + (p.location_name ? 1 : 0);
+    return { ...p, orientation, hasFaces, quality, caption: buildCaption(p) };
+  });
+
+  // Async dimensions - for now use sync metadata if available
+  // Sort by date
+  const pages = [];
+
+  // Date range
+  const dates = photoData.filter(p => p.date_taken).map(p => new Date(p.date_taken));
+  const minDate = dates.length ? new Date(Math.min(...dates)) : null;
+  const maxDate = dates.length ? new Date(Math.max(...dates)) : null;
+  const dateRange = minDate ? (maxDate && maxDate - minDate > 86400000
+    ? `${minDate.toLocaleDateString('en-US',{month:'long',day:'numeric'})} – ${maxDate.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}`
+    : minDate.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})) : '';
+  const locations = [...new Set(photoData.map(p => p.location_name).filter(Boolean))];
+
+  // Cover page: best photo
+  const bestPhoto = [...photoData].sort((a,b) => b.quality - a.quality)[0];
+  pages.push({
+    type: 'cover',
+    photo: { filename: bestPhoto.filename },
+    title: album.name,
+    dateRange,
+    location: locations.slice(0,2).join(' · ')
+  });
+
+  // Layout remaining photos
+  const remaining = photoData.filter(p => p.id !== bestPhoto.id);
+  let i = 0;
+  let lastDate = null;
+
+  while (i < remaining.length) {
+    const p = remaining[i];
+
+    // Check for date/location divider
+    const pDate = p.date_taken ? p.date_taken.substring(0, 10) : null;
+    if (pDate && lastDate && pDate !== lastDate) {
+      const daysDiff = Math.abs(new Date(pDate) - new Date(lastDate)) / 86400000;
+      if (daysDiff > 1) {
+        pages.push({
+          type: 'divider',
+          date: new Date(pDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
+          location: p.location_name || ''
+        });
+      }
+    }
+    lastDate = pDate;
+
+    const left = remaining.length - i;
+
+    if (left >= 4 && i % 5 === 0) {
+      // Feature + supporting (1 large + 2-3 small)
+      const count = Math.min(left, 4);
+      pages.push({
+        type: 'feature',
+        photos: remaining.slice(i, i + count).map(ph => ({ filename: ph.filename, caption: ph.caption })),
+        caption: remaining[i].caption
+      });
+      i += count;
+    } else if (left >= 3 && i % 3 === 0) {
+      // Collage
+      const count = Math.min(left, 4);
+      pages.push({
+        type: 'collage',
+        photos: remaining.slice(i, i + count).map(ph => ({ filename: ph.filename, caption: ph.caption })),
+        caption: ''
+      });
+      i += count;
+    } else if (left >= 2) {
+      // Two-up
+      pages.push({
+        type: 'twoup',
+        photos: remaining.slice(i, i + 2).map(ph => ({ filename: ph.filename, caption: ph.caption }))
+      });
+      i += 2;
+    } else {
+      // Full bleed single
+      pages.push({
+        type: 'fullbleed',
+        photos: [{ filename: p.filename, caption: p.caption }]
+      });
+      i++;
+    }
+  }
+
+  return { album, pages };
+}
+
+function buildCaption(photo) {
+  const parts = [];
+  if (photo.date_taken) {
+    parts.push(new Date(photo.date_taken).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }));
+  }
+  if (photo.location_name) parts.push(photo.location_name);
+  return parts.join(' · ');
+}
+
+app.get('/api/albums/:id/book', (req, res) => {
+  const result = generateBookLayout(req.params.id);
+  if (!result) return res.status(404).json({ error: 'Album not found' });
+  res.json(result);
+});
+
+// ─── PDF Generation ──────────────────────────────────────────
+app.get('/api/albums/:id/book/pdf', async (req, res) => {
+  const PDFDocument = require('pdfkit');
+  const result = generateBookLayout(req.params.id);
+  if (!result) return res.status(404).json({ error: 'Album not found' });
+
+  const { album, pages } = result;
+  if (!pages.length) return res.status(400).json({ error: 'No photos in album' });
+
+  // A4 with 3mm bleed
+  const W = 595.28; // A4 width in points
+  const H = 841.89; // A4 height in points
+  const BLEED = 8.5; // 3mm in points
+
+  const doc = new PDFDocument({ size: [W + BLEED*2, H + BLEED*2], margin: 0, autoFirstPage: false });
+  const safeName = (album.name || 'PhotoBook').replace(/[^a-zA-Z0-9 _-]/g, '').trim() || 'PhotoBook';
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pdf"`);
+  doc.pipe(res);
+
+  const pw = W + BLEED*2;
+  const ph = H + BLEED*2;
+  const margin = BLEED + 36; // bleed + inner margin
+
+  for (let pi = 0; pi < pages.length; pi++) {
+    const page = pages[pi];
+    doc.addPage();
+
+    // White background
+    doc.rect(0, 0, pw, ph).fill('#ffffff');
+
+    if (page.type === 'cover') {
+      // Cover photo centered
+      if (page.photo) {
+        const imgPath = path.join(__dirname, 'uploads', page.photo.filename);
+        if (fs.existsSync(imgPath)) {
+          try {
+            const imgW = pw - margin*2;
+            const imgH = ph * 0.5;
+            doc.image(imgPath, margin, margin + 60, { fit: [imgW, imgH], align: 'center', valign: 'center' });
+          } catch(e) {}
+        }
+      }
+      // Title
+      doc.font('Helvetica').fontSize(28).fillColor('#1d1d1f')
+        .text(page.title || '', margin, ph * 0.65, { width: pw - margin*2, align: 'center' });
+      // Date + location
+      doc.font('Helvetica').fontSize(11).fillColor('#86868b')
+        .text([page.dateRange, page.location].filter(Boolean).join('  ·  '), margin, ph * 0.72, { width: pw - margin*2, align: 'center' });
+
+    } else if (page.type === 'fullbleed') {
+      const p = page.photos[0];
+      const imgPath = path.join(__dirname, 'uploads', p.filename);
+      if (fs.existsSync(imgPath)) {
+        try { doc.image(imgPath, 0, 0, { cover: [pw, ph] }); } catch(e) {}
+      }
+      // Caption at bottom
+      if (p.caption) {
+        doc.rect(0, ph - 50, pw, 50).fill('rgba(0,0,0,0.4)');
+        doc.font('Helvetica').fontSize(10).fillColor('#ffffff')
+          .text(p.caption, margin, ph - 36, { width: pw - margin*2, align: 'center' });
+      }
+
+    } else if (page.type === 'twoup') {
+      const imgW = (pw - margin*3) / 2;
+      const imgH = ph - margin*2 - 40;
+      page.photos.forEach((p, idx) => {
+        const imgPath = path.join(__dirname, 'uploads', p.filename);
+        if (fs.existsSync(imgPath)) {
+          try { doc.image(imgPath, margin + idx * (imgW + margin), margin, { fit: [imgW, imgH], align: 'center', valign: 'center' }); } catch(e) {}
+        }
+        if (p.caption) {
+          doc.font('Helvetica').fontSize(9).fillColor('#86868b')
+            .text(p.caption, margin + idx * (imgW + margin), ph - margin - 20, { width: imgW, align: 'center' });
+        }
+      });
+
+    } else if (page.type === 'feature') {
+      const mainP = page.photos[0];
+      const mainImgPath = path.join(__dirname, 'uploads', mainP.filename);
+      const mainH = (ph - margin*2) * 0.6;
+      if (fs.existsSync(mainImgPath)) {
+        try { doc.image(mainImgPath, margin, margin, { fit: [pw - margin*2, mainH], align: 'center', valign: 'center' }); } catch(e) {}
+      }
+      // Supporting photos
+      const rest = page.photos.slice(1);
+      const smallW = (pw - margin*2 - (rest.length - 1) * 10) / rest.length;
+      const smallH = (ph - margin*2) * 0.3;
+      rest.forEach((p, idx) => {
+        const imgPath = path.join(__dirname, 'uploads', p.filename);
+        if (fs.existsSync(imgPath)) {
+          try { doc.image(imgPath, margin + idx * (smallW + 10), margin + mainH + 16, { fit: [smallW, smallH], align: 'center', valign: 'center' }); } catch(e) {}
+        }
+      });
+      if (page.caption) {
+        doc.font('Helvetica').fontSize(9).fillColor('#86868b')
+          .text(page.caption, margin, ph - margin - 10, { width: pw - margin*2, align: 'center' });
+      }
+
+    } else if (page.type === 'collage') {
+      const cols = 2;
+      const rows = Math.ceil(page.photos.length / cols);
+      const gap = 10;
+      const cellW = (pw - margin*2 - gap) / cols;
+      const cellH = (ph - margin*2 - 30 - gap * (rows - 1)) / rows;
+      page.photos.forEach((p, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        const imgPath = path.join(__dirname, 'uploads', p.filename);
+        if (fs.existsSync(imgPath)) {
+          try { doc.image(imgPath, margin + col * (cellW + gap), margin + row * (cellH + gap), { fit: [cellW, cellH], align: 'center', valign: 'center' }); } catch(e) {}
+        }
+      });
+
+    } else if (page.type === 'divider') {
+      doc.font('Helvetica').fontSize(22).fillColor('#333333')
+        .text(page.date || '', margin, ph * 0.4, { width: pw - margin*2, align: 'center' });
+      doc.moveTo(pw/2 - 20, ph * 0.48).lineTo(pw/2 + 20, ph * 0.48).strokeColor('#dddddd').lineWidth(0.5).stroke();
+      if (page.location) {
+        doc.font('Helvetica').fontSize(11).fillColor('#86868b')
+          .text(page.location, margin, ph * 0.5, { width: pw - margin*2, align: 'center' });
+      }
+    }
+
+    // Page number (skip cover)
+    if (pi > 0) {
+      doc.font('Helvetica').fontSize(9).fillColor('#bbbbbb')
+        .text(String(pi), 0, ph - BLEED - 20, { width: pw, align: 'center' });
+    }
+  }
+
+  doc.end();
+});
+
 app.listen(PORT, () => console.log(`Photo Album app running on http://localhost:${PORT}`));
