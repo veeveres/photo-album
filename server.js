@@ -6,6 +6,7 @@ const sharp = require('sharp');
 const exifr = require('exifr');
 const Database = require('better-sqlite3');
 const PDFDocument = require('pdfkit');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3456;
@@ -32,6 +33,8 @@ db.exec(`
     ai_tags TEXT,
     album_id INTEGER,
     sort_order INTEGER DEFAULT 0,
+    batch_id TEXT,
+    processing_status TEXT DEFAULT 'pending',
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (album_id) REFERENCES albums(id)
   );
@@ -43,55 +46,180 @@ db.exec(`
   );
 `);
 
-// Multer
+// Add columns if they don't exist (migration for existing DBs)
+try { db.exec('ALTER TABLE photos ADD COLUMN batch_id TEXT'); } catch(e) {}
+try { db.exec('ALTER TABLE photos ADD COLUMN processing_status TEXT DEFAULT "pending"'); } catch(e) {}
+
+// ─── Batch tracking ──────────────────────────────────────────
+const batches = new Map(); // batchId -> { total, uploaded, processed, analyzing, done, failed, photos: [{id, status}] }
+
+// ─── HEIC detection ──────────────────────────────────────────
+function isHeic(file) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  return ext === '.heic' || ext === '.heif' || file.mimetype === 'image/heic' || file.mimetype === 'image/heif';
+}
+
+// ─── Multer config ───────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: path.join(__dirname, 'uploads'),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_'))
+  filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '-' + file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_'))
 });
-const upload = multer({ storage, fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|gif|tiff)$/.test(file.mimetype)) });
+const upload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024, files: 500 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowed = /^image\/(jpeg|png|webp|gif|tiff|heic|heif)$/.test(file.mimetype) ||
+      ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.tiff', '.heic', '.heif'].includes(ext);
+    cb(null, allowed);
+  }
+});
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/thumbnails', express.static(path.join(__dirname, 'thumbnails')));
 
-// Upload endpoint
-app.post('/api/upload', upload.array('photos', 50), async (req, res) => {
+// ─── Batch upload endpoint ───────────────────────────────────
+app.post('/api/upload', upload.array('photos', 500), async (req, res) => {
+  const files = req.files || [];
+  if (!files.length) return res.json({ batchId: null, photos: [] });
+
+  const batchId = uuidv4();
+  const batch = { total: files.length, uploaded: 0, processed: 0, failed: 0, complete: false, photos: [] };
+  batches.set(batchId, batch);
+
+  // Save all files to DB immediately (resilience: photos saved before any processing)
   const results = [];
-  for (const file of (req.files || [])) {
-    try {
-      // Generate thumbnail
-      const thumbName = 'thumb_' + file.filename;
-      await sharp(file.path).resize(400, 400, { fit: 'cover' }).jpeg({ quality: 80 }).toFile(path.join(__dirname, 'thumbnails', thumbName));
+  const insertStmt = db.prepare('INSERT INTO photos (filename, original_name, batch_id, processing_status) VALUES (?, ?, ?, ?)');
 
-      // Extract EXIF
-      let exif = {};
-      try { exif = await exifr.parse(file.path, { gps: true, pick: ['DateTimeOriginal', 'Make', 'Model'] }) || {}; } catch(e) {}
-
-      const dateTaken = exif.DateTimeOriginal ? new Date(exif.DateTimeOriginal).toISOString() : null;
-      const lat = exif.latitude || null;
-      const lon = exif.longitude || null;
-      const camera = [exif.Make, exif.Model].filter(Boolean).join(' ') || null;
-
-      const stmt = db.prepare('INSERT INTO photos (filename, original_name, date_taken, latitude, longitude, camera) VALUES (?, ?, ?, ?, ?, ?)');
-      const info = stmt.run(file.filename, file.originalname, dateTaken, lat, lon, camera);
-      const photoId = info.lastInsertRowid;
-
-      // Async: reverse geocode + AI analysis
-      processPhotoAsync(photoId, file.path, lat, lon);
-
-      results.push({ id: photoId, filename: file.filename, thumbnail: thumbName, date_taken: dateTaken, location: null, camera });
-    } catch(e) {
-      console.error('Upload error:', e);
-    }
+  for (const file of files) {
+    const info = insertStmt.run(file.filename, file.originalname, batchId, 'uploaded');
+    const photoId = Number(info.lastInsertRowid);
+    batch.uploaded++;
+    batch.photos.push({ id: photoId, filename: file.filename, originalname: file.originalname, path: file.path, status: 'uploaded' });
+    results.push({ id: photoId, filename: file.filename, thumbnail: null });
   }
-  res.json({ photos: results });
+
+  res.json({ batchId, count: files.length, photos: results });
+
+  // Start background processing
+  processBatch(batchId).catch(e => console.error('Batch processing error:', e));
 });
 
-async function processPhotoAsync(photoId, filePath, lat, lon) {
+// ─── SSE endpoint for batch status ──────────────────────────
+app.get('/api/batch/:id/status', (req, res) => {
+  const batchId = req.params.id;
+  const batch = batches.get(batchId);
+  if (!batch) return res.status(404).json({ error: 'Batch not found' });
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+
+  const send = () => {
+    const b = batches.get(batchId);
+    if (!b) { res.end(); return; }
+    res.write(`data: ${JSON.stringify({ total: b.total, uploaded: b.uploaded, processed: b.processed, failed: b.failed, complete: b.complete })}\n\n`);
+    if (b.complete) { clearInterval(iv); setTimeout(() => res.end(), 500); }
+  };
+
+  send();
+  const iv = setInterval(send, 1000);
+  req.on('close', () => clearInterval(iv));
+});
+
+// ─── Polling fallback for batch status ──────────────────────
+app.get('/api/batch/:id/poll', (req, res) => {
+  const batch = batches.get(req.params.id);
+  if (!batch) return res.status(404).json({ error: 'Batch not found' });
+  res.json({ total: batch.total, uploaded: batch.uploaded, processed: batch.processed, failed: batch.failed, complete: batch.complete });
+});
+
+// ─── Background batch processor ─────────────────────────────
+async function processBatch(batchId) {
+  const batch = batches.get(batchId);
+  if (!batch) return;
+
+  // Process in parallel batches of 5
+  const CONCURRENCY = 5;
+  const photos = batch.photos.slice();
+
+  for (let i = 0; i < photos.length; i += CONCURRENCY) {
+    const chunk = photos.slice(i, i + CONCURRENCY);
+    await Promise.allSettled(chunk.map(p => processPhoto(batchId, p)));
+  }
+
+  batch.complete = true;
+  // Clean up batch after 5 minutes
+  setTimeout(() => batches.delete(batchId), 5 * 60 * 1000);
+}
+
+async function processPhoto(batchId, photoEntry) {
+  const batch = batches.get(batchId);
+  const { id: photoId, filename, path: filePath, originalname } = photoEntry;
+  const updateStatus = db.prepare('UPDATE photos SET processing_status = ? WHERE id = ?');
+
   try {
-    // Reverse geocode
+    // Step 1: HEIC conversion
+    let processedPath = filePath;
+    let processedFilename = filename;
+    const ext = path.extname(originalname).toLowerCase();
+
+    if (ext === '.heic' || ext === '.heif') {
+      try {
+        // Try sharp first (works if libvips has HEIF support)
+        const jpegFilename = filename.replace(/\.(heic|heif)$/i, '.jpg');
+        const jpegPath = path.join(__dirname, 'uploads', jpegFilename);
+        await sharp(filePath).jpeg({ quality: 92 }).toFile(jpegPath);
+        // Remove original HEIC
+        try { fs.unlinkSync(filePath); } catch(e) {}
+        processedPath = jpegPath;
+        processedFilename = jpegFilename;
+        db.prepare('UPDATE photos SET filename = ? WHERE id = ?').run(jpegFilename, photoId);
+      } catch(sharpErr) {
+        // Fallback: try heic-convert
+        try {
+          const heicConvert = require('heic-convert');
+          const inputBuffer = fs.readFileSync(filePath);
+          const jpegBuffer = await heicConvert({ buffer: inputBuffer, format: 'JPEG', quality: 0.92 });
+          const jpegFilename = filename.replace(/\.(heic|heif)$/i, '.jpg');
+          const jpegPath = path.join(__dirname, 'uploads', jpegFilename);
+          fs.writeFileSync(jpegPath, Buffer.from(jpegBuffer));
+          try { fs.unlinkSync(filePath); } catch(e) {}
+          processedPath = jpegPath;
+          processedFilename = jpegFilename;
+          db.prepare('UPDATE photos SET filename = ? WHERE id = ?').run(jpegFilename, photoId);
+        } catch(heicErr) {
+          console.error(`HEIC conversion failed for ${originalname}:`, heicErr.message);
+          // Keep original file, continue processing
+        }
+      }
+    }
+
+    // Step 2: EXIF extraction
+    updateStatus.run('extracting_exif', photoId);
+    let exif = {};
+    try { exif = await exifr.parse(processedPath, { gps: true, pick: ['DateTimeOriginal', 'Make', 'Model'] }) || {}; } catch(e) {}
+
+    const dateTaken = exif.DateTimeOriginal ? new Date(exif.DateTimeOriginal).toISOString() : null;
+    const lat = exif.latitude || null;
+    const lon = exif.longitude || null;
+    const camera = [exif.Make, exif.Model].filter(Boolean).join(' ') || null;
+
+    db.prepare('UPDATE photos SET date_taken = ?, latitude = ?, longitude = ?, camera = ? WHERE id = ?')
+      .run(dateTaken, lat, lon, camera, photoId);
+
+    // Step 3: Thumbnail generation
+    updateStatus.run('generating_thumbnail', photoId);
+    const thumbName = 'thumb_' + processedFilename;
+    await sharp(processedPath).resize(400, 400, { fit: 'cover' }).jpeg({ quality: 80 }).toFile(path.join(__dirname, 'thumbnails', thumbName));
+
+    // Step 4: Reverse geocode
     if (lat && lon) {
+      updateStatus.run('geocoding', photoId);
       try {
         const resp = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=14`, {
           headers: { 'User-Agent': 'PhotoAlbumApp/1.0' }
@@ -99,14 +227,17 @@ async function processPhotoAsync(photoId, filePath, lat, lon) {
         const data = await resp.json();
         const loc = data.address ? [data.address.city || data.address.town || data.address.village, data.address.country].filter(Boolean).join(', ') : (data.display_name || '');
         if (loc) db.prepare('UPDATE photos SET location_name = ? WHERE id = ?').run(loc, photoId);
-      } catch(e) { console.error('Geocode error:', e); }
+        // Rate limit for Nominatim
+        await new Promise(r => setTimeout(r, 1100));
+      } catch(e) { console.error('Geocode error:', e.message); }
     }
 
-    // AI analysis via OpenRouter
+    // Step 5: AI analysis
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (apiKey) {
+      updateStatus.run('analyzing', photoId);
       try {
-        const imgBuf = await sharp(filePath).resize(512, 512, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer();
+        const imgBuf = await sharp(processedPath).resize(512, 512, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer();
         const b64 = imgBuf.toString('base64');
         const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
@@ -129,37 +260,45 @@ async function processPhotoAsync(photoId, filePath, lat, lon) {
         const desc = descMatch ? descMatch[1].trim() : text.substring(0, 200);
         const tags = tagsMatch ? tagsMatch[1].trim() : '';
         db.prepare('UPDATE photos SET ai_description = ?, ai_tags = ? WHERE id = ?').run(desc, tags, photoId);
-      } catch(e) { console.error('AI analysis error:', e); }
+      } catch(e) { console.error('AI analysis error:', e.message); }
     }
 
-    // Auto-album assignment
+    // Step 6: Auto-album assignment
+    updateStatus.run('clustering', photoId);
     autoAssignAlbum(photoId);
-  } catch(e) { console.error('Process error:', e); }
+
+    // Done
+    updateStatus.run('complete', photoId);
+    if (batch) batch.processed++;
+
+  } catch(e) {
+    console.error(`Processing error for photo ${photoId}:`, e.message);
+    updateStatus.run('error', photoId);
+    if (batch) batch.failed++;
+    if (batch) batch.processed++;
+  }
 }
 
 function autoAssignAlbum(photoId) {
   const photo = db.prepare('SELECT * FROM photos WHERE id = ?').get(photoId);
   if (!photo || photo.album_id) return;
 
-  // Try to find a matching album by date+location
   const dateStr = photo.date_taken ? photo.date_taken.substring(0, 10) : null;
-  
+
   if (dateStr) {
-    // Find photos from same date with albums
     const match = db.prepare(`
       SELECT album_id FROM photos 
       WHERE album_id IS NOT NULL AND date_taken LIKE ? || '%'
       ${photo.location_name ? "AND (location_name = ? OR location_name IS NULL)" : ""}
       LIMIT 1
     `).get(...(photo.location_name ? [dateStr, photo.location_name] : [dateStr]));
-    
+
     if (match) {
       db.prepare('UPDATE photos SET album_id = ? WHERE id = ?').run(match.album_id, photoId);
       return;
     }
   }
 
-  // Try matching by AI tags
   if (photo.ai_tags) {
     const tags = photo.ai_tags.toLowerCase().split(',').map(t => t.trim()).filter(Boolean);
     const albums = db.prepare('SELECT DISTINCT a.id, a.name FROM albums a JOIN photos p ON p.album_id = a.id WHERE p.ai_tags IS NOT NULL').all();
@@ -180,7 +319,6 @@ function autoAssignAlbum(photoId) {
   let albumName = 'New Album';
   if (photo.ai_tags) {
     const tags = photo.ai_tags.split(',').map(t => t.trim()).filter(Boolean);
-    // Generate name from prominent tags
     const themeWords = ['beach', 'city', 'nature', 'family', 'food', 'night', 'sunset', 'mountain', 'travel', 'party', 'portrait', 'street', 'garden', 'snow', 'rain', 'indoor', 'outdoor', 'sport', 'architecture', 'animal'];
     const matched = tags.filter(t => themeWords.some(w => t.toLowerCase().includes(w)));
     if (matched.length > 0) {
@@ -199,49 +337,49 @@ function autoAssignAlbum(photoId) {
   db.prepare('UPDATE photos SET album_id = ? WHERE id = ?').run(r.lastInsertRowid, photoId);
 }
 
-// API: Get all photos
+// ─── API: Get all photos ─────────────────────────────────────
 app.get('/api/photos', (req, res) => {
   const photos = db.prepare('SELECT p.*, a.name as album_name FROM photos p LEFT JOIN albums a ON p.album_id = a.id ORDER BY p.date_taken DESC, p.created_at DESC').all();
   res.json(photos.map(p => ({ ...p, thumbnail: 'thumb_' + p.filename })));
 });
 
-// API: Get albums
+// ─── API: Get albums ─────────────────────────────────────────
 app.get('/api/albums', (req, res) => {
   const albums = db.prepare('SELECT a.*, COUNT(p.id) as photo_count FROM albums a LEFT JOIN photos p ON p.album_id = a.id GROUP BY a.id ORDER BY a.created_at DESC').all();
   res.json(albums);
 });
 
-// API: Get album photos
+// ─── API: Get album photos ───────────────────────────────────
 app.get('/api/albums/:id/photos', (req, res) => {
   const photos = db.prepare('SELECT p.*, a.name as album_name FROM photos p LEFT JOIN albums a ON p.album_id = a.id WHERE p.album_id = ? ORDER BY p.sort_order, p.date_taken').all(req.params.id);
   res.json(photos.map(p => ({ ...p, thumbnail: 'thumb_' + p.filename })));
 });
 
-// API: Rename album
+// ─── API: Rename album ───────────────────────────────────────
 app.put('/api/albums/:id', (req, res) => {
   db.prepare('UPDATE albums SET name = ?, auto_generated = 0 WHERE id = ?').run(req.body.name, req.params.id);
   res.json({ ok: true });
 });
 
-// API: Move photo to album
+// ─── API: Move photo to album ────────────────────────────────
 app.put('/api/photos/:id/move', (req, res) => {
   db.prepare('UPDATE photos SET album_id = ? WHERE id = ?').run(req.body.album_id, req.params.id);
   res.json({ ok: true });
 });
 
-// API: Reorder photo
+// ─── API: Reorder photo ──────────────────────────────────────
 app.put('/api/photos/:id/reorder', (req, res) => {
   db.prepare('UPDATE photos SET sort_order = ? WHERE id = ?').run(req.body.sort_order, req.params.id);
   res.json({ ok: true });
 });
 
-// API: Create album
+// ─── API: Create album ──────────────────────────────────────
 app.post('/api/albums', (req, res) => {
   const r = db.prepare('INSERT INTO albums (name, auto_generated) VALUES (?, 0)').run(req.body.name || 'Untitled Album');
   res.json({ id: r.lastInsertRowid });
 });
 
-// API: Delete photo
+// ─── API: Delete photo ──────────────────────────────────────
 app.delete('/api/photos/:id', (req, res) => {
   const photo = db.prepare('SELECT filename FROM photos WHERE id = ?').get(req.params.id);
   if (photo) {
@@ -252,11 +390,11 @@ app.delete('/api/photos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// API: Export album as PDF
+// ─── API: Export album as PDF ────────────────────────────────
 app.get('/api/albums/:id/pdf', async (req, res) => {
   const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(req.params.id);
   if (!album) return res.status(404).json({ error: 'Album not found' });
-  
+
   const photos = db.prepare('SELECT * FROM photos WHERE album_id = ? ORDER BY sort_order, date_taken').all(req.params.id);
   if (!photos.length) return res.status(400).json({ error: 'Album is empty' });
 
@@ -278,7 +416,6 @@ app.get('/api/albums/:id/pdf', async (req, res) => {
     doc.fontSize(12).text(`${min.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}${min.getTime() !== max.getTime() ? ' — ' + max.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : ''}`, 50, pageH / 3 + 85, { align: 'center', width: pageW });
   }
 
-  // Photo pages: 1 photo per page for simplicity & quality
   for (let i = 0; i < photos.length; i++) {
     doc.addPage();
     const photo = photos[i];
@@ -286,7 +423,6 @@ app.get('/api/albums/:id/pdf', async (req, res) => {
     if (!fs.existsSync(imgPath)) continue;
 
     try {
-      // Resize for PDF
       const resized = await sharp(imgPath).resize(1200, 800, { fit: 'inside' }).jpeg({ quality: 90 }).toBuffer();
       const meta = await sharp(resized).metadata();
       const imgW = Math.min(meta.width, pageW);
@@ -297,7 +433,6 @@ app.get('/api/albums/:id/pdf', async (req, res) => {
 
       doc.image(resized, x, y, { width: imgW, height: imgH });
 
-      // Caption
       const captionY = y + imgH + 20;
       const parts = [];
       if (photo.date_taken) parts.push(new Date(photo.date_taken).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }));

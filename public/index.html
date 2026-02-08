@@ -2,93 +2,118 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Photo Album</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #f5f5f7; color: #1d1d1f; }
-.header { background: #fff; border-bottom: 1px solid #e5e5e5; padding: 16px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
-.header h1 { font-size: 22px; font-weight: 600; }
-.header nav { display: flex; gap: 8px; margin-left: auto; }
-.header nav button { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; background: #e5e5e5; transition: all .2s; }
+.header { background: #fff; border-bottom: 1px solid #e5e5e5; padding: 12px 16px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 100; }
+.header h1 { font-size: 20px; font-weight: 600; white-space: nowrap; }
+.header nav { display: flex; gap: 6px; margin-left: auto; }
+.header nav button { padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; background: #e5e5e5; transition: all .2s; touch-action: manipulation; }
 .header nav button.active { background: #0071e3; color: #fff; }
-.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+.container { max-width: 1200px; margin: 0 auto; padding: 16px; }
 
 /* Upload zone */
-.upload-zone { border: 2px dashed #c5c5c7; border-radius: 16px; padding: 48px; text-align: center; cursor: pointer; transition: all .2s; background: #fff; margin-bottom: 24px; }
+.upload-zone { border: 2px dashed #c5c5c7; border-radius: 16px; padding: 32px 16px; text-align: center; cursor: pointer; transition: all .2s; background: #fff; margin-bottom: 20px; touch-action: manipulation; }
 .upload-zone.drag { border-color: #0071e3; background: #f0f7ff; }
-.upload-zone h2 { font-size: 18px; margin-bottom: 8px; }
-.upload-zone p { color: #86868b; font-size: 14px; }
+.upload-zone h2 { font-size: 17px; margin-bottom: 6px; }
+.upload-zone p { color: #86868b; font-size: 13px; }
 .upload-zone input { display: none; }
-.upload-progress { margin-top: 12px; font-size: 13px; color: #0071e3; }
+
+/* Progress UI */
+.batch-progress { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); display: none; }
+.batch-progress.active { display: block; }
+.batch-progress .progress-bar { background: #e5e5e5; border-radius: 6px; height: 8px; overflow: hidden; margin: 10px 0; }
+.batch-progress .progress-fill { background: #0071e3; height: 100%; border-radius: 6px; transition: width .3s ease; width: 0%; }
+.batch-progress .progress-text { font-size: 13px; color: #555; display: flex; justify-content: space-between; }
+.batch-progress .status-label { font-size: 15px; font-weight: 600; }
+.batch-progress.complete .progress-fill { background: #34c759; }
 
 /* Grid */
-.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+@media (min-width: 600px) { .photo-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; } }
 .photo-card { background: #fff; border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform .2s, box-shadow .2s; position: relative; }
 .photo-card:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,.1); }
+.photo-card:active { transform: scale(0.97); }
 .photo-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
-.photo-card .info { padding: 10px 12px; }
-.photo-card .info .date { font-size: 12px; color: #86868b; }
-.photo-card .info .location { font-size: 12px; color: #0071e3; margin-top: 2px; }
-.photo-card .badge { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
-.photo-card .delete-btn { position: absolute; top: 8px; left: 8px; background: rgba(255,59,48,.85); color: #fff; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: none; font-size: 14px; line-height: 24px; text-align: center; }
+.photo-card .info { padding: 8px 10px; }
+.photo-card .info .date { font-size: 11px; color: #86868b; }
+.photo-card .info .location { font-size: 11px; color: #0071e3; margin-top: 2px; }
+.photo-card .badge { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.6); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 8px; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo-card .delete-btn { position: absolute; top: 6px; left: 6px; background: rgba(255,59,48,.85); color: #fff; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; display: none; font-size: 14px; line-height: 28px; text-align: center; touch-action: manipulation; }
 .photo-card:hover .delete-btn { display: block; }
+@media (hover: none) { .photo-card .delete-btn { display: block; } }
+.photo-card .processing-badge { position: absolute; bottom: 40px; left: 0; right: 0; text-align: center; }
+.photo-card .processing-badge span { background: rgba(0,113,227,.85); color: #fff; font-size: 10px; padding: 2px 8px; border-radius: 8px; }
 
 /* Albums */
-.album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+@media (max-width: 599px) { .album-grid { grid-template-columns: 1fr; } }
 .album-card { background: #fff; border-radius: 16px; overflow: hidden; cursor: pointer; transition: transform .2s; }
 .album-card:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,.1); }
-.album-card .preview { display: grid; grid-template-columns: 1fr 1fr; height: 180px; }
+.album-card:active { transform: scale(0.98); }
+.album-card .preview { display: grid; grid-template-columns: 1fr 1fr; height: 160px; }
 .album-card .preview img { width: 100%; height: 100%; object-fit: cover; }
 .album-card .preview .empty { background: #e5e5e5; display: flex; align-items: center; justify-content: center; color: #aaa; font-size: 32px; }
-.album-card .meta { padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
-.album-card .meta h3 { font-size: 15px; font-weight: 600; }
-.album-card .meta span { font-size: 13px; color: #86868b; }
-.album-actions { display: flex; gap: 8px; margin-top: 8px; }
-.album-actions button { padding: 6px 12px; border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; cursor: pointer; font-size: 13px; }
-.album-actions button:hover { background: #f5f5f7; }
-.album-actions .export-btn { background: #0071e3; color: #fff; border-color: #0071e3; }
-.album-actions .export-btn:hover { background: #0062c4; }
+.album-card .meta { padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; }
+.album-card .meta h3 { font-size: 14px; font-weight: 600; }
+.album-card .meta span { font-size: 12px; color: #86868b; }
 
-/* Album detail view */
+/* Album detail */
 .album-detail { display: none; }
-.album-detail .back { cursor: pointer; color: #0071e3; font-size: 14px; margin-bottom: 16px; display: inline-block; }
-.album-detail h2 { font-size: 24px; margin-bottom: 4px; cursor: pointer; }
+.album-detail .back { cursor: pointer; color: #0071e3; font-size: 14px; margin-bottom: 12px; display: inline-block; touch-action: manipulation; }
+.album-detail h2 { font-size: 22px; margin-bottom: 4px; cursor: pointer; }
 .album-detail h2:hover { text-decoration: underline; }
+.album-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.export-btn { padding: 8px 16px; background: #0071e3; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; touch-action: manipulation; }
+.export-btn:active { background: #005bb5; }
 
 /* Modal */
-.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 200; align-items: center; justify-content: center; }
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 200; align-items: center; justify-content: center; padding: 16px; }
 .modal-overlay.show { display: flex; }
-.modal { background: #fff; border-radius: 16px; max-width: 700px; width: 90%; max-height: 90vh; overflow-y: auto; }
+.modal { background: #fff; border-radius: 16px; max-width: 700px; width: 100%; max-height: 90vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .modal img { width: 100%; border-radius: 16px 16px 0 0; }
-.modal .details { padding: 20px; }
-.modal .details h3 { font-size: 16px; margin-bottom: 8px; }
+.modal .details { padding: 16px; }
 .modal .details p { font-size: 14px; color: #555; margin-bottom: 6px; }
 .modal .details .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .modal .details .tags span { background: #f0f0f0; padding: 4px 10px; border-radius: 12px; font-size: 12px; }
 .modal .move-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee; }
-.modal .move-section select { padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd; font-size: 13px; }
-.close-modal { position: absolute; top: 16px; right: 16px; background: rgba(0,0,0,.6); color: #fff; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-size: 18px; }
+.modal .move-section select { padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; min-height: 44px; }
+.close-modal { position: absolute; top: 16px; right: 16px; background: rgba(0,0,0,.6); color: #fff; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; font-size: 18px; touch-action: manipulation; z-index: 10; }
 
 .hidden { display: none; }
 .loading { text-align: center; padding: 48px; color: #86868b; }
+
+/* New album button */
+.new-album-btn { padding: 8px 16px; border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; cursor: pointer; font-size: 13px; touch-action: manipulation; min-height: 44px; }
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>📸 Photo Album</h1>
+  <h1>📸 Photos</h1>
   <nav>
-    <button class="active" onclick="showView('photos')">All Photos</button>
+    <button class="active" onclick="showView('photos')">All</button>
     <button onclick="showView('albums')">Albums</button>
   </nav>
 </div>
 
 <div class="container">
   <div class="upload-zone" id="uploadZone">
-    <h2>📁 Drop photos here</h2>
-    <p>or click to browse • JPEG, PNG, WebP supported</p>
-    <input type="file" id="fileInput" multiple accept="image/*">
-    <div class="upload-progress hidden" id="uploadProgress"></div>
+    <h2>📁 Tap to add photos</h2>
+    <p>Or drop files here • JPEG, PNG, HEIC, WebP</p>
+    <input type="file" id="fileInput" multiple accept="image/*,image/heic,image/heif,.heic,.heif">
+  </div>
+
+  <div class="batch-progress" id="batchProgress">
+    <div class="status-label" id="batchStatusLabel">Processing...</div>
+    <div class="progress-bar"><div class="progress-fill" id="batchProgressFill"></div></div>
+    <div class="progress-text">
+      <span id="batchProgressText">0 / 0</span>
+      <span id="batchProgressPct">0%</span>
+    </div>
   </div>
 
   <div id="photosView">
@@ -96,18 +121,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   </div>
 
   <div id="albumsView" class="hidden">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <h2>Albums</h2>
-      <button onclick="createAlbum()" style="padding:8px 16px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;cursor:pointer">+ New Album</button>
+      <button class="new-album-btn" onclick="createAlbum()">+ New Album</button>
     </div>
     <div class="album-grid" id="albumGrid"></div>
   </div>
 
   <div id="albumDetail" class="album-detail">
     <span class="back" onclick="showView('albums')">← Back to Albums</span>
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+    <div class="album-header">
       <h2 id="albumTitle" onclick="renameCurrentAlbum()"></h2>
-      <button class="export-btn" onclick="exportAlbum()" style="padding:8px 16px;background:#0071e3;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px">📄 Export PDF</button>
+      <button class="export-btn" onclick="exportAlbum()">📄 Export PDF</button>
     </div>
     <div class="photo-grid" id="albumPhotoGrid"></div>
   </div>
@@ -122,7 +147,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 </div>
 
 <script>
-let allPhotos = [], allAlbums = [], currentAlbumId = null;
+let allPhotos = [], allAlbums = [], currentAlbumId = null, activeBatchId = null, batchSSE = null;
 
 // Upload
 const zone = document.getElementById('uploadZone');
@@ -131,22 +156,139 @@ zone.addEventListener('click', () => fileInput.click());
 zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
 zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
 zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag'); uploadFiles(e.dataTransfer.files); });
-fileInput.addEventListener('change', e => uploadFiles(e.target.files));
+fileInput.addEventListener('change', e => { uploadFiles(e.target.files); e.target.value = ''; });
 
 async function uploadFiles(files) {
   if (!files.length) return;
-  const prog = document.getElementById('uploadProgress');
-  prog.classList.remove('hidden');
-  prog.textContent = `Uploading ${files.length} photo(s)...`;
+  const total = files.length;
+  const progressEl = document.getElementById('batchProgress');
+  const fillEl = document.getElementById('batchProgressFill');
+  const textEl = document.getElementById('batchProgressText');
+  const pctEl = document.getElementById('batchProgressPct');
+  const labelEl = document.getElementById('batchStatusLabel');
+
+  progressEl.classList.add('active');
+  progressEl.classList.remove('complete');
+  labelEl.textContent = `Uploading ${total} photo${total > 1 ? 's' : ''}...`;
+  fillEl.style.width = '0%';
+  textEl.textContent = `0 / ${total}`;
+  pctEl.textContent = '0%';
+
   const fd = new FormData();
   for (const f of files) fd.append('photos', f);
+
   try {
-    const r = await fetch('/api/upload', { method: 'POST', body: fd });
-    const data = await r.json();
-    prog.textContent = `✓ ${data.photos.length} photo(s) uploaded! AI analysis in progress...`;
-    setTimeout(() => { prog.classList.add('hidden'); loadPhotos(); loadAlbums(); }, 3000);
+    // Upload with XHR for progress
+    const xhr = new XMLHttpRequest();
+    const uploadPromise = new Promise((resolve, reject) => {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          fillEl.style.width = pct + '%';
+          pctEl.textContent = pct + '%';
+          textEl.textContent = `Uploading... ${formatBytes(e.loaded)} / ${formatBytes(e.total)}`;
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText));
+        } else {
+          reject(new Error('Upload failed'));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Upload failed'));
+    });
+
+    xhr.open('POST', '/api/upload');
+    xhr.send(fd);
+    const data = await uploadPromise;
+
+    if (data.batchId) {
+      activeBatchId = data.batchId;
+      labelEl.textContent = `Processing ${total} photo${total > 1 ? 's' : ''}...`;
+      fillEl.style.width = '0%';
+      watchBatch(data.batchId, total);
+    }
+
+    // Reload photos immediately to show thumbnails as they appear
     loadPhotos();
-  } catch(e) { prog.textContent = 'Upload failed'; }
+  } catch(e) {
+    labelEl.textContent = '❌ Upload failed. Please try again.';
+    setTimeout(() => progressEl.classList.remove('active'), 5000);
+  }
+}
+
+function watchBatch(batchId, total) {
+  const progressEl = document.getElementById('batchProgress');
+  const fillEl = document.getElementById('batchProgressFill');
+  const textEl = document.getElementById('batchProgressText');
+  const pctEl = document.getElementById('batchProgressPct');
+  const labelEl = document.getElementById('batchStatusLabel');
+
+  // Try SSE first, fall back to polling
+  if (typeof EventSource !== 'undefined') {
+    if (batchSSE) batchSSE.close();
+    batchSSE = new EventSource(`/api/batch/${batchId}/status`);
+    batchSSE.onmessage = (e) => {
+      const d = JSON.parse(e.data);
+      updateBatchUI(d, total, fillEl, textEl, pctEl, labelEl, progressEl);
+      if (d.complete) {
+        batchSSE.close();
+        batchSSE = null;
+        loadPhotos();
+        loadAlbums();
+      }
+    };
+    batchSSE.onerror = () => {
+      batchSSE.close();
+      batchSSE = null;
+      pollBatch(batchId, total);
+    };
+  } else {
+    pollBatch(batchId, total);
+  }
+}
+
+function pollBatch(batchId, total) {
+  const progressEl = document.getElementById('batchProgress');
+  const fillEl = document.getElementById('batchProgressFill');
+  const textEl = document.getElementById('batchProgressText');
+  const pctEl = document.getElementById('batchProgressPct');
+  const labelEl = document.getElementById('batchStatusLabel');
+
+  const iv = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/batch/${batchId}/poll`);
+      const d = await r.json();
+      updateBatchUI(d, total, fillEl, textEl, pctEl, labelEl, progressEl);
+      if (d.complete) {
+        clearInterval(iv);
+        loadPhotos();
+        loadAlbums();
+      }
+    } catch(e) {}
+  }, 1500);
+}
+
+function updateBatchUI(d, total, fillEl, textEl, pctEl, labelEl, progressEl) {
+  const pct = Math.round(d.processed / d.total * 100);
+  fillEl.style.width = pct + '%';
+  pctEl.textContent = pct + '%';
+  textEl.textContent = `${d.processed} / ${d.total} processed` + (d.failed > 0 ? ` (${d.failed} failed)` : '');
+  labelEl.textContent = d.complete ? `✅ All ${d.total} photos processed!` : `Processing ${d.processed}/${d.total}...`;
+  if (d.complete) {
+    progressEl.classList.add('complete');
+    setTimeout(() => progressEl.classList.remove('active'), 4000);
+    // Refresh to show final state
+    loadPhotos();
+    loadAlbums();
+  }
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
 }
 
 async function loadPhotos() {
@@ -164,17 +306,20 @@ async function loadAlbums() {
 function renderPhotos() {
   const grid = document.getElementById('photoGrid');
   if (!allPhotos.length) { grid.innerHTML = '<div class="loading">No photos yet. Upload some!</div>'; return; }
-  grid.innerHTML = allPhotos.map(p => `
+  grid.innerHTML = allPhotos.map(p => {
+    const isProcessing = p.processing_status && p.processing_status !== 'complete' && p.processing_status !== 'error';
+    return `
     <div class="photo-card" onclick="showPhoto(${p.id})">
       <button class="delete-btn" onclick="event.stopPropagation();deletePhoto(${p.id})">✕</button>
       ${p.album_name ? `<span class="badge">${esc(p.album_name)}</span>` : ''}
-      <img src="/thumbnails/${p.thumbnail}" loading="lazy" alt="">
+      <img src="/thumbnails/${p.thumbnail}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 1 1%22><rect fill=%22%23e5e5e5%22 width=%221%22 height=%221%22/></svg>'">
+      ${isProcessing ? `<div class="processing-badge"><span>⏳ ${p.processing_status}</span></div>` : ''}
       <div class="info">
         <div class="date">${p.date_taken ? new Date(p.date_taken).toLocaleDateString() : 'No date'}</div>
         ${p.location_name ? `<div class="location">📍 ${esc(p.location_name)}</div>` : ''}
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function renderAlbums() {
@@ -182,7 +327,7 @@ function renderAlbums() {
   if (!allAlbums.length) { grid.innerHTML = '<div class="loading">No albums yet. Upload photos to auto-generate albums!</div>'; return; }
   grid.innerHTML = allAlbums.map(a => {
     const photos = allPhotos.filter(p => p.album_id === a.id).slice(0, 4);
-    const previews = Array.from({length: 4}, (_, i) => photos[i] ? `<img src="/thumbnails/${photos[i].thumbnail}">` : '<div class="empty">+</div>').join('');
+    const previews = Array.from({length: 4}, (_, i) => photos[i] ? `<img src="/thumbnails/${photos[i].thumbnail}" onerror="this.parentElement.innerHTML+='<div class=empty>+</div>';this.remove()">` : '<div class="empty">+</div>').join('');
     return `
       <div class="album-card" onclick="openAlbum(${a.id})">
         <div class="preview">${previews}</div>
@@ -207,9 +352,9 @@ async function openAlbum(id) {
   const photos = await r.json();
   const grid = document.getElementById('albumPhotoGrid');
   grid.innerHTML = photos.map(p => `
-    <div class="photo-card" onclick="showPhoto(${p.id})" draggable="true" data-id="${p.id}">
+    <div class="photo-card" onclick="showPhoto(${p.id})">
       <button class="delete-btn" onclick="event.stopPropagation();deletePhoto(${p.id})">✕</button>
-      <img src="/thumbnails/${p.thumbnail}" loading="lazy" alt="">
+      <img src="/thumbnails/${p.thumbnail}" loading="lazy" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 1 1%22><rect fill=%22%23e5e5e5%22 width=%221%22 height=%221%22/></svg>'">
       <div class="info">
         <div class="date">${p.date_taken ? new Date(p.date_taken).toLocaleDateString() : ''}</div>
         ${p.location_name ? `<div class="location">📍 ${esc(p.location_name)}</div>` : ''}
@@ -222,8 +367,7 @@ function showView(view) {
   document.getElementById('photosView').classList.toggle('hidden', view !== 'photos');
   document.getElementById('albumsView').classList.toggle('hidden', view !== 'albums');
   document.getElementById('albumDetail').style.display = 'none';
-  document.querySelectorAll('.header nav button').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.header nav button').forEach(b => { if (b.textContent.toLowerCase().includes(view.replace('s',''))) b.classList.add('active'); });
+  document.querySelectorAll('.header nav button').forEach((b, i) => b.classList.toggle('active', (i === 0 && view === 'photos') || (i === 1 && view === 'albums')));
   if (view === 'albums') loadAlbums();
   if (view === 'photos') loadPhotos();
 }
@@ -284,7 +428,7 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s; re
 // Init
 loadPhotos();
 loadAlbums();
-// Refresh periodically to pick up AI results
+// Refresh periodically to pick up processing results
 setInterval(() => { loadPhotos(); loadAlbums(); }, 10000);
 </script>
 </body>
