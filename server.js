@@ -379,6 +379,28 @@ app.post('/api/albums', (req, res) => {
   res.json({ id: r.lastInsertRowid });
 });
 
+// ─── API: Delete album ──────────────────────────────────────
+app.delete('/api/albums/:id', (req, res) => {
+  const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(req.params.id);
+  if (!album) return res.status(404).json({ error: 'Album not found' });
+
+  const deletePhotos = req.query.deletePhotos === 'true';
+
+  if (deletePhotos) {
+    const photos = db.prepare('SELECT filename FROM photos WHERE album_id = ?').all(req.params.id);
+    for (const p of photos) {
+      try { fs.unlinkSync(path.join(__dirname, 'uploads', p.filename)); } catch(e) {}
+      try { fs.unlinkSync(path.join(__dirname, 'thumbnails', 'thumb_' + p.filename)); } catch(e) {}
+    }
+    db.prepare('DELETE FROM photos WHERE album_id = ?').run(req.params.id);
+  } else {
+    db.prepare('UPDATE photos SET album_id = NULL WHERE album_id = ?').run(req.params.id);
+  }
+
+  db.prepare('DELETE FROM albums WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ─── API: Delete photo ──────────────────────────────────────
 app.delete('/api/photos/:id', (req, res) => {
   const photo = db.prepare('SELECT filename FROM photos WHERE id = ?').get(req.params.id);
