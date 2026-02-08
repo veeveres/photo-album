@@ -5,7 +5,7 @@ const fs = require('fs');
 const sharp = require('sharp');
 const exifr = require('exifr');
 const Database = require('better-sqlite3');
-const PDFDocument = require('pdfkit');
+const archiver = require('archiver');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
@@ -412,59 +412,51 @@ app.delete('/api/photos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── API: Export album as PDF ────────────────────────────────
-app.get('/api/albums/:id/pdf', async (req, res) => {
+// ─── API: Export album as ZIP ────────────────────────────────
+app.get('/api/albums/:id/export', async (req, res) => {
   const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(req.params.id);
   if (!album) return res.status(404).json({ error: 'Album not found' });
 
   const photos = db.prepare('SELECT * FROM photos WHERE album_id = ? ORDER BY sort_order, date_taken').all(req.params.id);
   if (!photos.length) return res.status(400).json({ error: 'Album is empty' });
 
-  const doc = new PDFDocument({ size: 'A4', margin: 50 });
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${album.name.replace(/[^a-zA-Z0-9 ]/g, '')}.pdf"`);
-  doc.pipe(res);
+  const sanitize = (s) => (s || 'Photo').replace(/[^a-zA-Z0-9 _-]/g, '').substring(0, 60).trim() || 'Photo';
+  const albumDir = sanitize(album.name);
 
-  const pageW = doc.page.width - 100;
-  const pageH = doc.page.height - 100;
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${albumDir}.zip"`);
 
-  // Title page
-  doc.fontSize(36).font('Helvetica-Bold').text(album.name, 50, pageH / 3, { align: 'center', width: pageW });
-  doc.fontSize(14).font('Helvetica').text(`${photos.length} photos`, 50, pageH / 3 + 60, { align: 'center', width: pageW });
-  const dates = photos.filter(p => p.date_taken).map(p => new Date(p.date_taken));
-  if (dates.length) {
-    const min = new Date(Math.min(...dates));
-    const max = new Date(Math.max(...dates));
-    doc.fontSize(12).text(`${min.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}${min.getTime() !== max.getTime() ? ' — ' + max.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : ''}`, 50, pageH / 3 + 85, { align: 'center', width: pageW });
-  }
+  const archive = archiver('zip', { zlib: { level: 5 } });
+  archive.pipe(res);
+  archive.on('error', (err) => { console.error('Archive error:', err); res.status(500).end(); });
 
+  // Add photos
+  const photoEntries = [];
   for (let i = 0; i < photos.length; i++) {
-    doc.addPage();
-    const photo = photos[i];
-    const imgPath = path.join(__dirname, 'uploads', photo.filename);
+    const p = photos[i];
+    const imgPath = path.join(__dirname, 'uploads', p.filename);
     if (!fs.existsSync(imgPath)) continue;
-
-    try {
-      const resized = await sharp(imgPath).resize(1200, 800, { fit: 'inside' }).jpeg({ quality: 90 }).toBuffer();
-      const meta = await sharp(resized).metadata();
-      const imgW = Math.min(meta.width, pageW);
-      const scale = imgW / meta.width;
-      const imgH = meta.height * scale;
-      const x = 50 + (pageW - imgW) / 2;
-      const y = 60;
-
-      doc.image(resized, x, y, { width: imgW, height: imgH });
-
-      const captionY = y + imgH + 20;
-      const parts = [];
-      if (photo.date_taken) parts.push(new Date(photo.date_taken).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }));
-      if (photo.location_name) parts.push(photo.location_name);
-      if (parts.length) doc.fontSize(11).font('Helvetica').text(parts.join('  •  '), 50, captionY, { align: 'center', width: pageW });
-      if (photo.ai_description) doc.fontSize(9).font('Helvetica-Oblique').fillColor('#666').text(photo.ai_description.substring(0, 150), 50, captionY + 18, { align: 'center', width: pageW }).fillColor('#000');
-    } catch(e) { console.error('PDF image error:', e); }
+    const seq = String(i + 1).padStart(2, '0');
+    const desc = sanitize(p.ai_description ? p.ai_description.split(/[.,!?]/)[0] : p.original_name);
+    const ext = path.extname(p.filename) || '.jpg';
+    const entryName = `${albumDir}/${seq} - ${desc}${ext}`;
+    archive.file(imgPath, { name: entryName });
+    photoEntries.push({ seq, desc, ext, filename: `${seq} - ${desc}${ext}`, date: p.date_taken, location: p.location_name });
   }
 
-  doc.end();
+  // Generate index.html
+  const indexHtml = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>${album.name}</title>
+<style>body{font-family:system-ui,sans-serif;background:#111;color:#fff;margin:0;padding:20px}
+h1{text-align:center;margin-bottom:20px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.grid img{width:100%;border-radius:8px;cursor:pointer}.grid .item{text-align:center}
+.grid .caption{font-size:12px;color:#aaa;margin-top:4px}</style></head>
+<body><h1>${album.name}</h1><div class="grid">${photoEntries.map(e =>
+    `<div class="item"><img src="${e.filename}" loading="lazy"><div class="caption">${e.desc}${e.date ? ' • ' + new Date(e.date).toLocaleDateString() : ''}${e.location ? ' • ' + e.location : ''}</div></div>`
+  ).join('')}</div></body></html>`;
+  archive.append(indexHtml, { name: `${albumDir}/index.html` });
+
+  await archive.finalize();
 });
 
 app.listen(PORT, () => console.log(`Photo Album app running on http://localhost:${PORT}`));
