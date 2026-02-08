@@ -146,10 +146,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
 <div class="container">
   <div class="upload-zone" id="uploadZone">
-    <button class="select-btn" id="selectBtn">📁 Select Photos</button>
+    <label for="fileInput" class="select-btn" id="selectBtn" role="button" tabindex="0">📁 Select Photos</label>
     <p>Or drop files here • JPEG, PNG, HEIC, WebP</p>
     <p class="ios-tip">💡 Tip: In the iOS photo picker, tap ••• then <b>Select All</b> to grab an entire album</p>
-    <input type="file" id="fileInput" multiple accept="image/*,image/heic,image/heif,.heic,.heif">
+    <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/tiff,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.tiff,.heic,.heif">
     <div class="preview-section" id="previewSection">
       <div class="count" id="selectionCount"></div>
       <div class="preview-grid" id="previewGrid"></div>
@@ -226,7 +226,12 @@ const fileInput = document.getElementById('fileInput');
 const selectBtn = document.getElementById('selectBtn');
 let selectedFiles = null;
 
-selectBtn.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+// label-for-input handles click natively on iOS; also add JS fallback
+selectBtn.addEventListener('click', (e) => {
+  // If label-for didn't trigger (some browsers), manually click input
+  setTimeout(() => { if (!fileInput.matches(':focus')) fileInput.click(); }, 50);
+});
+selectBtn.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
 zone.addEventListener('click', (e) => { if (!selectedFiles && e.target === zone) fileInput.click(); });
 zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
 zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
@@ -268,8 +273,12 @@ function clearSelection() {
 
 function startUpload() {
   if (!selectedFiles || !selectedFiles.length) return;
-  const files = selectedFiles;
-  clearSelection();
+  const files = Array.from(selectedFiles);
+  selectedFiles = null;
+  document.getElementById('previewSection').classList.remove('active');
+  zone.classList.remove('has-selection');
+  selectBtn.textContent = '📁 Select Photos';
+  document.getElementById('previewGrid').innerHTML = '';
   uploadFiles(files);
 }
 
